@@ -10,18 +10,18 @@
 #
 
 CENTOS_HOSTNAME=centos
-VM_NAME="CentOS Linux ($CENTOS_HOSTNAME)"
-VM_CPUS=2
-VM_MEMSIZE=4096
+VM_NAME="$CENTOS_HOSTNAME (CentOS 7)"
+VM_CPUS=1
+VM_MEMSIZE=512
 
-# find mirror at "http://mirror.centos.org/centos/6.5/isos/x86_64/CentOS-6.5-x86_64-minimal.iso"
-CENTOS_MIRROR="http://centos.skarta.net/6.5/isos/x86_64/CentOS-6.5-x86_64-minimal.iso"
+# find mirror at "http://mirror.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
+## TODO beta iso (EPEL repo is also beta)
+CENTOS_MIRROR="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 
 PARALLELS_TOOLS="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
-
-
-
+ 
 #-----------------------------------------------------------------------------------------------
+
 
 ##
 ##
@@ -32,21 +32,22 @@ function main() {
    # create VM
    if [ "$1" = "--create" ]
    then
-      has_mkisofs
-      create_iso_vars
+      is_parallels_sdk_installed
       create_workspace
+      create_iso_vars
       trap delete_workspace EXIT
 
       fetch_centos_iso
-      checksum_centos_iso
-      extract_centos_iso
+      ## TODO no checksums for beta iso
+      #checksum_centos_iso
 
-      prepare_kickstart
-      add_kickstart_cfg
-
-      burn_kickstart_iso
+      make_kickstart_cfg
+      make_kickstart_iso
 
       create_vm
+
+      make_parallels_send_kickstart_boot_option
+      call_parallels_send_kickstart_boot_option
 
       umount_isos_message
 
@@ -79,9 +80,14 @@ function create_vm() {
    prlctl set    "$VM_NAME" --on-shutdown close
    prlctl set    "$VM_NAME" --cpus $VM_CPUS
    prlctl set    "$VM_NAME" --memsize $VM_MEMSIZE
-   prlctl set    "$VM_NAME" --device-set net0 --type bridged
-   prlctl set    "$VM_NAME" --device-set cdrom0 --connect --image "$KICKSTART_ISO"
-   prlctl set    "$VM_NAME" --device-add cdrom  --connect --image "$PARALLELS_TOOLS"
+
+   prlctl set    "$VM_NAME" --device-del net0
+   prlctl set    "$VM_NAME" --device-del cdrom0
+
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$CENTOS_ISO"
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$KICKSTART_ISO"
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$PARALLELS_TOOLS"
+   prlctl set    "$VM_NAME" --device-add net   --enable --type bridged
    prlctl start  "$VM_NAME"
 }
 
@@ -97,34 +103,19 @@ function delete_vm() {
 ##
 ##
 function umount_isos() {
-   #prlctl list "$VM_NAME" --info | grep cdrom
-
    prlctl set "$VM_NAME" --device-set cdrom0 --disconnect
-   prlctl set "$VM_NAME" --device-set cdrom1 --disconnect
-
    prlctl set "$VM_NAME" --device-del cdrom1
+   prlctl set "$VM_NAME" --device-del cdrom2
 }
 
 ##
 ##
 ##
 function umount_isos_message() {
-   printf "\n%s %s %s\n\n"\
+   printf "\n%s %s\n\n\t%s\n\n"\
       "Optional:"\
-      "After CentOS has rebooted and you see the login prompt,"\
-      "run '$SCRIPT_NAME --umount' to disconnect the install ISOs"
-}
-
-
-##
-##
-##
-function has_mkisofs() {
-   if ! command -v mkisofs > /dev/null 2>&1
-   then
-      echo "mkisofs not found: install it with 'brew install cdrtools'"
-      exit
-   fi
+      "Disconnect ISOs and remove extra cdrom devices used by the installation by stopping the VM and running:"\
+      "$SCRIPT_NAME --umount"
 }
 
 ##
@@ -132,7 +123,7 @@ function has_mkisofs() {
 ##
 function create_iso_vars() {
    CENTOS_ISO="/tmp/${CENTOS_MIRROR##*/}"
-   KICKSTART_ISO="${CENTOS_ISO%.iso}-kickstart.iso"
+   KICKSTART_ISO="/tmp/kickstart.iso"
 }
 
 ##
@@ -141,24 +132,16 @@ function create_iso_vars() {
 function create_workspace() {
    TMPDIR=$(mktemp -d /tmp/${SCRIPT_NAME}.XXXXXX)
 
-   SRC="$TMPDIR/read-only"
-   mkdir "$SRC"
-
-   DST="$TMPDIR/read-write"
+   KICKSTART_DIR="$TMPDIR/kickstart"
+   mkdir "$KICKSTART_DIR"
 }
 
 ##
 ##
 ##
 function delete_workspace() {
-   if [ -e "$SRC" ]
-   then
-      hdiutil detach -quiet "$SRC" || true
-   fi
-
    if [ -e "$TMPDIR" ]
    then
-      chmod -R +w "$TMPDIR"
       rm -rf "$TMPDIR"
    fi
 }
@@ -200,48 +183,128 @@ function checksum_centos_iso() {
 ##
 ##
 ##
-function extract_centos_iso() {
-   hdiutil attach -quiet "$CENTOS_ISO" -mountpoint "$SRC"
-   ditto "$SRC" "$DST"
-   hdiutil detach -quiet "$SRC"
+function is_parallels_sdk_installed() {
+    if ! python -c 'import prlsdkapi' 2> /dev/null
+   then
+      echo "'Parallels Virtualization SDK' is not installed. Get it from http://www.parallels.com/downloads/desktop/"
+      exit
+   fi
 }
 
 ##
 ##
 ##
-function burn_kickstart_iso() {
-   mkisofs -quiet\
-      -o "$KICKSTART_ISO"\
-      -b isolinux/isolinux.bin\
-      -c isolinux/boot.cat\
-      -no-emul-boot\
-      -boot-load-size 4\
-      -boot-info-table -R -J -T "$DST"
+function call_parallels_send_kickstart_boot_option() {
+    #ks=cdrom
+    #ks=cdrom:/ks.cfg
+    #ks=cdrom:/dev/sr1:/ks.cfg
+    python $TMPDIR/parallels_send_kickstart_boot_option "$VM_NAME" "I"$'\t'" ks=cdrom:/dev/sr1:/ks.cfg"
 }
 
-##
-##
-##
-function prepare_kickstart() {
-   chmod -R +w "$DST"
-   rm "$DST/isolinux/boot.cat"
 
-   cat > "$DST/isolinux/isolinux.cfg" <<EOF
-default ks
-label ks
-  kernel vmlinuz
-  append initrd=initrd.img ks=cdrom:/isolinux/ks.cfg
+##
+##
+##
+function make_parallels_send_kickstart_boot_option() {
+   cat > "$TMPDIR/parallels_send_kickstart_boot_option" <<EOF
+#!/usr/bin/env python
+
+import sys
+import prlsdkapi
+
+if len(sys.argv) != 3:
+    print "Usage  : parallels_send_kickstart_boot_option '<VM_NAME>' '<KICKSTART_BOOT_OPTION>'"
+    print "Example: parallels_send_kickstart_boot_option 'CentOS VM' 'ks=http://127.0.0.1:1234/ks.cfg'"
+    exit()
+
+vm_name=sys.argv[1]
+kickstart_boot_option = sys.argv[2]
+
+prlsdk = prlsdkapi.prlsdk
+consts = prlsdkapi.prlsdk.consts
+#print consts.ScanCodesList
+
+prlsdk.InitializeSDK(consts.PAM_DESKTOP_MAC)
+server = prlsdkapi.Server()
+login_job=server.login_local()
+login_job.wait()
+
+vm_list_job = server.get_vm_list()
+result= vm_list_job.wait()
+
+vm_list = [result.get_param_by_index(i) for i in range(result.get_params_count())]
+vm = [vm for vm in vm_list if vm.get_name() == vm_name]
+
+if not vm:
+    vm_names = [vm.get_name() for vm in vm_list]
+    print "ERROR: Failed to find VM with name '%s' in:" % vm_name
+    for name in vm_names:
+        print "'" + name + "'"
+    exit()
+
+vm = vm[0]
+
+vm_io = prlsdkapi.VmIO()
+try:
+    vm_io.connect_to_vm(vm).wait()
+except prlsdkapi.PrlSDKError, e:
+    print "ERROR: %s" % e
+    exit()
+
+press = consts.PKE_PRESS
+release = consts.PKE_RELEASE
+shift_left = consts.ScanCodesList['SHIFT_LEFT']
+enter = consts.ScanCodesList['ENTER']
+timeout = 5
+
+for c in kickstart_boot_option:
+    shift = False
+
+    if c == " ":
+        c = consts.ScanCodesList['SPACE']
+    elif c == "\t":
+        c = consts.ScanCodesList['TAB']
+    elif c == "/":
+        c = consts.ScanCodesList['SLASH']
+    elif c == "=":
+        c = consts.ScanCodesList['PLUS']
+    elif c == ".":
+        c = consts.ScanCodesList['GREATER']
+    elif c == ":":
+        shift = True
+        c = consts.ScanCodesList['COLON']
+    else:
+        c = consts.ScanCodesList[c.upper()]
+
+    if shift:
+        vm_io.send_key_event(vm, shift_left, press, timeout)
+    vm_io.send_key_event(vm, c, press, timeout)
+    vm_io.send_key_event(vm, c, release, timeout)
+    if shift:
+        vm_io.send_key_event(vm, shift_left, release, timeout)
+
+vm_io.send_key_event(vm, enter, press, timeout)
+vm_io.send_key_event(vm, enter, release, timeout)
+
+vm_io.disconnect_from_vm(vm)
+server.logoff()
+prlsdkapi.deinit_sdk
 EOF
 }
 
 ##
 ##
 ##
-function add_kickstart_cfg() {
-   cat > "$DST/isolinux/ks.cfg" <<EOF
-# Kickstart file automatically generated by anaconda.
+function make_kickstart_iso() {
+    rm -f "$KICKSTART_ISO"
+    hdiutil makehybrid -quiet -iso -joliet -o "$KICKSTART_ISO" "$KICKSTART_DIR"
+}
 
-#text
+##
+##
+##
+function make_kickstart_cfg() {
+   cat > "$KICKSTART_DIR/ks.cfg" <<EOF
 cmdline
 skipx
 install
@@ -249,14 +312,12 @@ cdrom
 
 lang en_US.UTF-8
 keyboard us
+timezone --utc Etc/UTC
 
-network --activate --onboot yes --device eth0 --bootproto dhcp --noipv6\
-   --hostname $CENTOS_HOSTNAME
+network --activate --onboot yes --device eth0 --bootproto dhcp --noipv6 --hostname $CENTOS_HOSTNAME
 
 rootpw  --plaintext newroot
 authconfig --enableshadow --passalgo=sha512
-#timezone --utc Europe/Copenhagen
-timezone --utc Etc/UTC
 
 firewall --enabled --service=ssh,mdns,http,https --port=8080:tcp,8443:tcp
 selinux --disabled
@@ -264,23 +325,18 @@ selinux --disabled
 bootloader --location=mbr
 zerombr
 clearpart --all --initlabel
+autopart
 
-part /boot --fstype=ext4 --size=500
+## TODO beta repo
+repo --name=epel --baseurl=http://dl.fedoraproject.org/pub/epel/beta/7/x86_64/
+#repo --name=epel --baseurl=http://dl.fedoraproject.org/pub/epel/7/x86_64/
 
-part pv.008002 --grow --size=1
-volgroup vg --pesize=4096 pv.008002
-logvol /home --fstype=ext4 --name=lv_home --vgname=vg --grow --size=100
-logvol / --fstype=ext4 --name=lv_root --vgname=vg --grow --size=1024 --maxsize=51200
-logvol swap --name=lv_swap --vgname=vg --grow --size=3968 --maxsize=3968
-
-repo --name=epel --baseurl=http://download.fedoraproject.org/pub/epel/6/x86_64/
+reboot
 
 %packages --nobase
 @core
 epel-release
 %end
-
-reboot
 
 %post
 exec < /dev/tty3 > /dev/tty3
@@ -292,11 +348,13 @@ echo "################################"
 (
 
 echo "Installing Parallels Tools..."
-mount -r -o exec /dev/sr1 /mnt
+mount -r -o exec /dev/sr2 /mnt
 /mnt/install --install-unattended-with-deps --progress
 umount /mnt
+echo "Note: Parallels Tools can be updated by running 'ptiagent-cmd --info'"
 
-yum install -y bash-completion git vim man avahi avahi-tools nss-mdns avahi-compat-libdns_sd
+
+yum install -y net-tools bash-completion git vim man avahi avahi-tools nss-mdns avahi-compat-libdns_sd
 yum upgrade -y
 
 ) 2>&1 | /usr/bin/tee /tmp/post_install.log
