@@ -5,20 +5,20 @@
 # Parallels Tools is installed.
 #
 # Zeroconf (a.k.a. rendezvous, a.k.a. bonjour) is enabled for easy ssh access on the
-# .local domain, e.g. with CENTOS_HOSTNAME=centos it is immediately possible to login
+# .local domain, e.g. with HOSTNAME=centos it is immediately possible to login
 # from OS X with 'ssh centos.local -l root'.
 #
 
-CENTOS_HOSTNAME=centos
-VM_NAME="$CENTOS_HOSTNAME (CentOS 7)"
+HOSTNAME=centos
+VM_NAME="$HOSTNAME (CentOS 7)"
 VM_CPUS=1
 VM_MEMSIZE=512
 
 # find mirror at "http://mirror.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 ## TODO beta iso (EPEL repo is also beta)
-CENTOS_MIRROR="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
+DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 
-PARALLELS_TOOLS="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
+PARALLELS_TOOLS_ISO="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
  
 #-----------------------------------------------------------------------------------------------
 
@@ -35,11 +35,11 @@ function main() {
       is_parallels_sdk_installed
       create_workspace
       create_iso_vars
-      trap delete_workspace EXIT
+      trap destroy_workspace EXIT
 
-      fetch_centos_iso
+      fetch_distro_iso
       ## TODO no checksums for beta iso
-      #checksum_centos_iso
+      #checksum_distro_iso
 
       make_kickstart_cfg
       make_kickstart_iso
@@ -56,19 +56,19 @@ function main() {
    then
       umount_isos
 
-   # delete VM
-   elif [ "$1" = "--delete" ]
+   # destroy VM
+   elif [ "$1" = "--destroy" ]
    then
-      delete_vm
+      destroy_vm
 
    # cleanup ISO files in /tmp
    elif [ "$1" = "--cleanup" ]
    then
       create_iso_vars
-      delete_isos
+      destroy_isos
 
    else
-      echo "usage: $SCRIPT_NAME [--create|--umount|--delete|--cleanup]"
+      echo "usage: $SCRIPT_NAME [--create|--umount|--destroy|--cleanup]"
    fi
 }
 
@@ -76,7 +76,7 @@ function main() {
 ##
 ##
 function create_vm() {
-   prlctl create "$VM_NAME" --ostype linux --distribution centos
+   prlctl create "$VM_NAME" --ostype linux
    prlctl set    "$VM_NAME" --on-shutdown close
    prlctl set    "$VM_NAME" --cpus $VM_CPUS
    prlctl set    "$VM_NAME" --memsize $VM_MEMSIZE
@@ -84,9 +84,9 @@ function create_vm() {
    prlctl set    "$VM_NAME" --device-del net0
    prlctl set    "$VM_NAME" --device-del cdrom0
 
-   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$CENTOS_ISO"
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$DISTRO_ISO"
    prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$KICKSTART_ISO"
-   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$PARALLELS_TOOLS"
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$PARALLELS_TOOLS_ISO"
    prlctl set    "$VM_NAME" --device-add net   --enable --type bridged
    prlctl start  "$VM_NAME"
 }
@@ -94,9 +94,9 @@ function create_vm() {
 ##
 ##
 ##
-function delete_vm() {
+function destroy_vm() {
    prlctl stop    "$VM_NAME" --kill
-   prlctl delete  "$VM_NAME"
+   prlctl destroy  "$VM_NAME"
 }
 
 ##
@@ -122,7 +122,7 @@ function umount_isos_message() {
 ##
 ##
 function create_iso_vars() {
-   CENTOS_ISO="/tmp/${CENTOS_MIRROR##*/}"
+   DISTRO_ISO="/tmp/${DISTRO_ISO_URL##*/}"
    KICKSTART_ISO="/tmp/kickstart.iso"
 }
 
@@ -139,7 +139,7 @@ function create_workspace() {
 ##
 ##
 ##
-function delete_workspace() {
+function destroy_workspace() {
    if [ -e "$TMPDIR" ]
    then
       rm -rf "$TMPDIR"
@@ -149,29 +149,29 @@ function delete_workspace() {
 ##
 ##
 ##
-function delete_isos() {
-   rm -f "$CENTOS_ISO"
+function destroy_isos() {
+   rm -f "$DISTRO_ISO"
    rm -f "$KICKSTART_ISO"
 }
 
 ##
 ##
 ##
-function fetch_centos_iso() {
-   if [ ! -e "$CENTOS_ISO" ]
+function fetch_distro_iso() {
+   if [ ! -e "$DISTRO_ISO" ]
    then
-      curl -o "$CENTOS_ISO" "$CENTOS_MIRROR"
+      curl -o "$DISTRO_ISO" "$DISTRO_ISO_URL"
    fi
 }
 
 ##
 ##
 ##
-function checksum_centos_iso() {
-   local mirror_sum=$(curl -s ${CENTOS_MIRROR%/*}/md5sum.txt |\
-      grep ${CENTOS_MIRROR##*/} | awk '{print $1}')
+function checksum_distro_iso() {
+   local mirror_sum=$(curl -s ${DISTRO_ISO_URL%/*}/md5sum.txt |\
+      grep ${DISTRO_ISO_URL##*/} | awk '{print $1}')
 
-   local local_sum=$(md5 -q $CENTOS_ISO)
+   local local_sum=$(md5 -q $DISTRO_ISO)
 
    if [ "$mirror_sum" != "$local_sum" ]
    then
@@ -314,7 +314,7 @@ lang en_US.UTF-8
 keyboard us
 timezone --utc Etc/UTC
 
-network --activate --onboot yes --device eth0 --bootproto dhcp --noipv6 --hostname $CENTOS_HOSTNAME
+network --activate --onboot yes --device eth0 --bootproto dhcp --noipv6 --hostname $HOSTNAME
 
 rootpw  --plaintext newroot
 authconfig --enableshadow --passalgo=sha512
@@ -353,8 +353,20 @@ mount -r -o exec /dev/sr2 /mnt
 umount /mnt
 echo "Note: Parallels Tools can be updated by running 'ptiagent-cmd --info'"
 
+yum install -y\
+    net-tools\
+    bash-completion\
+    git\
+    vim\
+    man\
+    avahi\
+    avahi-tools\
+    nss-mdns\
+    avahi-compat-libdns_sd\
+    docker-io
 
-yum install -y net-tools bash-completion git vim man avahi avahi-tools nss-mdns avahi-compat-libdns_sd
+systemctl enable docker
+
 yum upgrade -y
 
 ) 2>&1 | /usr/bin/tee /tmp/post_install.log
