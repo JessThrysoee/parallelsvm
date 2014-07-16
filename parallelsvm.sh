@@ -9,6 +9,134 @@
 # from OS X with 'ssh centos.local -l root'.
 #
 
+#-----------------------------------------------------------------------------------------------
+
+##
+##
+##
+function main() {
+   local SCRIPT_NAME=${0##*/}
+   local PARALLELSVM_RC=parallelsvm.rc
+
+   cd $PWD
+
+   # create rc file
+   if [ "$1" = "init" ]
+   then
+      create_parallelsvm_rc
+      exit
+   fi
+   source_parallelsvm_rc
+   init_env
+
+   # create VM
+   if [ "$1" = "create" ]
+   then
+      if vm_template_exists
+      then
+         create_vm_from_template
+      else
+         is_parallels_sdk_installed
+         create_workspace
+         trap delete_workspace EXIT
+
+         fetch_distro_iso
+         ## TODO no checksums for beta iso
+         #checksum_distro_iso
+
+         make_kickstart_cfg
+         make_kickstart_iso
+
+         create_vm
+
+         make_parallels_send_kickstart_boot_option
+         call_parallels_send_kickstart_boot_option
+
+         kickstart_wait
+         umount_isos_message
+      fi
+
+   # create template of VM
+   elif [ "$1" = "template" ]
+   then
+      create_workspace
+      trap delete_workspace EXIT
+      clone_vm_to_template "$2"
+
+   # start VM
+   elif [ "$1" = "start" ]
+   then
+      start_vm
+
+   # stop VM
+   elif [ "$1" = "stop" ]
+   then
+      stop_vm
+
+   # kill VM
+   elif [ "$1" = "kill" ]
+   then
+      kill_vm
+
+   # delete VM
+   elif [ "$1" = "delete" ]
+   then
+      delete_vm
+
+   # bash shell in VM
+   elif [ "$1" = "shell" ]
+   then
+      shell_vm
+
+   # umount ISO files from VM
+   elif [ "$1" = "umount" ]
+   then
+      umount_isos
+
+   # cleanup ISO files
+   elif [ "$1" = "cleanup" ]
+   then
+      delete_isos
+
+   else
+      echo "usage: $SCRIPT_NAME ACTION [OPTIONS]"
+      echo ""
+      echo "       ACTIONS:"
+      echo "                init"
+      echo "                create"
+      echo "                template [--force]"
+      echo ""
+      echo "                start"
+      echo "                stop"
+      echo "                kill"
+      echo "                delete"
+      echo "                shell"
+      echo ""
+      echo "                umount"
+      echo "                cleanup"
+   fi
+}
+
+##
+##
+##
+function source_parallelsvm_rc() {
+
+   if [ ! -e "$PARALLELSVM_RC" ]
+   then
+      echo "$PARALLELSVM_RC not found: call '$SCRIPT_NAME init' or change to dir containing $PARALLELSVM_RC"
+      exit
+   fi
+
+   . "$PARALLELSVM_RC"
+}
+
+##
+##
+##
+function create_parallelsvm_rc() {
+
+   cat > "$PARALLELSVM_RC" <<"EOF"
 HOSTNAME=centos
 VM_NAME="$HOSTNAME (CentOS 7)"
 VM_CPUS=1
@@ -19,64 +147,14 @@ VM_MEMSIZE=512
 DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 
 PARALLELS_TOOLS_ISO="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
- 
-#-----------------------------------------------------------------------------------------------
-
-
-##
-##
-##
-function main() {
-   local SCRIPT_NAME=${0##*/}
-
-   # create VM
-   if [ "$1" = "--create" ]
-   then
-      is_parallels_sdk_installed
-      create_workspace
-      create_iso_vars
-      trap destroy_workspace EXIT
-
-      fetch_distro_iso
-      ## TODO no checksums for beta iso
-      #checksum_distro_iso
-
-      make_kickstart_cfg
-      make_kickstart_iso
-
-      create_vm
-
-      make_parallels_send_kickstart_boot_option
-      call_parallels_send_kickstart_boot_option
-
-      umount_isos_message
-
-   # umount ISO files from VM
-   elif [ "$1" = "--umount" ]
-   then
-      umount_isos
-
-   # destroy VM
-   elif [ "$1" = "--destroy" ]
-   then
-      destroy_vm
-
-   # cleanup ISO files in /tmp
-   elif [ "$1" = "--cleanup" ]
-   then
-      create_iso_vars
-      destroy_isos
-
-   else
-      echo "usage: $SCRIPT_NAME [--create|--umount|--destroy|--cleanup]"
-   fi
+EOF
 }
 
 ##
 ##
 ##
 function create_vm() {
-   prlctl create "$VM_NAME" --ostype linux
+   prlctl create "$VM_NAME" --ostype linux --dst $VM_DIR
    prlctl set    "$VM_NAME" --on-shutdown close
    prlctl set    "$VM_NAME" --cpus $VM_CPUS
    prlctl set    "$VM_NAME" --memsize $VM_MEMSIZE
@@ -94,9 +172,78 @@ function create_vm() {
 ##
 ##
 ##
-function destroy_vm() {
-   prlctl stop    "$VM_NAME" --kill
-   prlctl destroy  "$VM_NAME"
+function vm_template_exists() {
+   test -e "$VM_TEMPLATE_PATH"
+}
+
+##
+##
+##
+function create_vm_from_template() {
+   prlctl register "$VM_TEMPLATE_PATH" \
+      && prlctl create "$VM_NAME" --ostemplate "$VM_TEMPLATE_NAME" --dst "$VM_DIR"
+   prlctl unregister "$VM_TEMPLATE_NAME"
+}
+
+##
+##
+##
+function clone_vm_to_template() {
+   if [ "$1" = "--force" ]
+   then
+      rm -rf "$VM_TEMPLATE_PATH"
+   fi
+   prlctl clone "$VM_NAME" --name "$VM_TEMPLATE_NAME" --template --dst "$VM_TEMPLATE_DIR"
+   prlctl unregister "$VM_TEMPLATE_NAME"
+}
+
+##
+##
+##
+function start_vm() {
+   prlctl start "$VM_NAME"
+}
+
+##
+##
+##
+function stop_vm() {
+   prlctl stop "$VM_NAME"
+}
+
+##
+##
+##
+function kill_vm() {
+   prlctl stop "$VM_NAME" --kill
+}
+
+##
+##
+##
+function delete_vm() {
+   kill_vm
+   prlctl delete "$VM_NAME"
+}
+
+##
+##
+##
+function kickstart_wait() {
+   printf "\nKickstarting "
+   while ! prlctl exec "$VM_NAME" true 2> /dev/null
+   do
+      printf "."
+      sleep 10
+   done
+   printf "\n"
+}
+
+##
+##
+##
+function shell_vm() {
+   prlctl enter "$VM_NAME"
 }
 
 ##
@@ -121,35 +268,48 @@ function umount_isos_message() {
 ##
 ##
 ##
-function create_iso_vars() {
-   DISTRO_ISO="/tmp/${DISTRO_ISO_URL##*/}"
-   KICKSTART_ISO="/tmp/kickstart.iso"
+function init_env() {
+   VM_DIR="$PWD/.vm"
+
+   VM_TEMPLATE_DIR="$PWD/.vm_template"
+   VM_TEMPLATE_NAME="${VM_NAME}_template"
+   VM_TEMPLATE_PATH="${VM_TEMPLATE_DIR}/${VM_TEMPLATE_NAME}.pvm"
+
+   TMP_DIR="$PWD/.tmp"
+   KICKSTART_DIR="$TMP_DIR/kickstart"
+
+   ISO_DIR="$PWD/.iso"
+   DISTRO_ISO="$ISO_DIR/${DISTRO_ISO_URL##*/}"
+   KICKSTART_ISO="$ISO_DIR/kickstart.iso"
 }
 
 ##
 ##
 ##
 function create_workspace() {
-   TMPDIR=$(mktemp -d /tmp/${SCRIPT_NAME}.XXXXXX)
+   mkdir -p "$VM_DIR"
+   mkdir -p "$VM_TEMPLATE_DIR"
 
-   KICKSTART_DIR="$TMPDIR/kickstart"
-   mkdir "$KICKSTART_DIR"
+   mkdir -p "$TMP_DIR"
+
+   mkdir -p "$ISO_DIR"
+   mkdir -p "$KICKSTART_DIR"
 }
 
 ##
 ##
 ##
-function destroy_workspace() {
-   if [ -e "$TMPDIR" ]
+function delete_workspace() {
+   if [ -e "$TMP_DIR" ]
    then
-      rm -rf "$TMPDIR"
+      rm -rf "$TMP_DIR"
    fi
 }
 
 ##
 ##
 ##
-function destroy_isos() {
+function delete_isos() {
    rm -f "$DISTRO_ISO"
    rm -f "$KICKSTART_ISO"
 }
@@ -184,7 +344,7 @@ function checksum_distro_iso() {
 ##
 ##
 function is_parallels_sdk_installed() {
-    if ! python -c 'import prlsdkapi' 2> /dev/null
+   if ! python -c 'import prlsdkapi' 2> /dev/null
    then
       echo "'Parallels Virtualization SDK' is not installed. Get it from http://www.parallels.com/downloads/desktop/"
       exit
@@ -195,27 +355,23 @@ function is_parallels_sdk_installed() {
 ##
 ##
 function call_parallels_send_kickstart_boot_option() {
-    #ks=cdrom
-    #ks=cdrom:/ks.cfg
-    #ks=cdrom:/dev/sr1:/ks.cfg
-    python $TMPDIR/parallels_send_kickstart_boot_option "$VM_NAME" "I"$'\t'" ks=cdrom:/dev/sr1:/ks.cfg"
+    python $TMP_DIR/parallels_send_kickstart_boot_option "$VM_NAME" "I"$'\t'" ks=cdrom:/dev/sr1:/ks.cfg"
 }
-
 
 ##
 ##
 ##
 function make_parallels_send_kickstart_boot_option() {
-   cat > "$TMPDIR/parallels_send_kickstart_boot_option" <<EOF
+   cat > "$TMP_DIR/parallels_send_kickstart_boot_option" <<EOF
 #!/usr/bin/env python
 
 import sys
 import prlsdkapi
 
 if len(sys.argv) != 3:
-    print "Usage  : parallels_send_kickstart_boot_option '<VM_NAME>' '<KICKSTART_BOOT_OPTION>'"
-    print "Example: parallels_send_kickstart_boot_option 'CentOS VM' 'ks=http://127.0.0.1:1234/ks.cfg'"
-    exit()
+   print "Usage  : parallels_send_kickstart_boot_option '<VM_NAME>' '<KICKSTART_BOOT_OPTION>'"
+   print "Example: parallels_send_kickstart_boot_option 'CentOS VM' 'ks=http://127.0.0.1:1234/ks.cfg'"
+   exit()
 
 vm_name=sys.argv[1]
 kickstart_boot_option = sys.argv[2]
@@ -236,20 +392,20 @@ vm_list = [result.get_param_by_index(i) for i in range(result.get_params_count()
 vm = [vm for vm in vm_list if vm.get_name() == vm_name]
 
 if not vm:
-    vm_names = [vm.get_name() for vm in vm_list]
-    print "ERROR: Failed to find VM with name '%s' in:" % vm_name
-    for name in vm_names:
-        print "'" + name + "'"
-    exit()
+   vm_names = [vm.get_name() for vm in vm_list]
+   print "ERROR: Failed to find VM with name '%s' in:" % vm_name
+   for name in vm_names:
+      print "'" + name + "'"
+   exit()
 
 vm = vm[0]
 
 vm_io = prlsdkapi.VmIO()
 try:
-    vm_io.connect_to_vm(vm).wait()
+     vm_io.connect_to_vm(vm).wait()
 except prlsdkapi.PrlSDKError, e:
-    print "ERROR: %s" % e
-    exit()
+     print "ERROR: %s" % e
+     exit()
 
 press = consts.PKE_PRESS
 release = consts.PKE_RELEASE
@@ -258,30 +414,30 @@ enter = consts.ScanCodesList['ENTER']
 timeout = 5
 
 for c in kickstart_boot_option:
-    shift = False
+   shift = False
 
-    if c == " ":
-        c = consts.ScanCodesList['SPACE']
-    elif c == "\t":
-        c = consts.ScanCodesList['TAB']
-    elif c == "/":
-        c = consts.ScanCodesList['SLASH']
-    elif c == "=":
-        c = consts.ScanCodesList['PLUS']
-    elif c == ".":
-        c = consts.ScanCodesList['GREATER']
-    elif c == ":":
-        shift = True
-        c = consts.ScanCodesList['COLON']
-    else:
-        c = consts.ScanCodesList[c.upper()]
+   if c == " ":
+      c = consts.ScanCodesList['SPACE']
+   elif c == "\t":
+      c = consts.ScanCodesList['TAB']
+   elif c == "/":
+      c = consts.ScanCodesList['SLASH']
+   elif c == "=":
+      c = consts.ScanCodesList['PLUS']
+   elif c == ".":
+      c = consts.ScanCodesList['GREATER']
+   elif c == ":":
+      shift = True
+      c = consts.ScanCodesList['COLON']
+   else:
+      c = consts.ScanCodesList[c.upper()]
 
-    if shift:
-        vm_io.send_key_event(vm, shift_left, press, timeout)
-    vm_io.send_key_event(vm, c, press, timeout)
-    vm_io.send_key_event(vm, c, release, timeout)
-    if shift:
-        vm_io.send_key_event(vm, shift_left, release, timeout)
+   if shift:
+      vm_io.send_key_event(vm, shift_left, press, timeout)
+   vm_io.send_key_event(vm, c, press, timeout)
+   vm_io.send_key_event(vm, c, release, timeout)
+   if shift:
+      vm_io.send_key_event(vm, shift_left, release, timeout)
 
 vm_io.send_key_event(vm, enter, press, timeout)
 vm_io.send_key_event(vm, enter, release, timeout)
@@ -296,8 +452,8 @@ EOF
 ##
 ##
 function make_kickstart_iso() {
-    rm -f "$KICKSTART_ISO"
-    hdiutil makehybrid -quiet -iso -joliet -o "$KICKSTART_ISO" "$KICKSTART_DIR"
+   rm -f "$KICKSTART_ISO"
+   hdiutil makehybrid -quiet -iso -joliet -o "$KICKSTART_ISO" "$KICKSTART_DIR"
 }
 
 ##
@@ -354,18 +510,18 @@ umount /mnt
 echo "Note: Parallels Tools can be updated by running 'ptiagent-cmd --info'"
 
 yum install -y\
-    net-tools\
-    bash-completion\
-    git\
-    vim\
-    man\
-    avahi\
-    avahi-tools\
-    nss-mdns\
-    avahi-compat-libdns_sd\
-    docker-io
+   net-tools\
+   bash-completion\
+   git\
+   vim\
+   man\
+   avahi\
+   avahi-tools\
+   nss-mdns\
+   avahi-compat-libdns_sd\
+   docker-io
 
-systemctl enable docker
+systemctl enable docker || true
 
 yum upgrade -y
 

@@ -1,0 +1,6 @@
+
+parallelsvm.rc
+.vm/
+.vm_template/
+.iso/
+.tmp/
