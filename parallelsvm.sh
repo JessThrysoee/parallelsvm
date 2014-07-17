@@ -110,7 +110,6 @@ function main() {
 ##
 ##
 function source_parallelsvm_rc() {
-
    if [ ! -e "$PARALLELSVM_RC" ]
    then
       echo "$PARALLELSVM_RC not found: call '$SCRIPT_NAME init' or change to dir containing $PARALLELSVM_RC"
@@ -124,18 +123,20 @@ function source_parallelsvm_rc() {
 ##
 ##
 function create_parallelsvm_rc() {
-
    cat > "$PARALLELSVM_RC" <<"EOF"
 HOSTNAME=centos
 VM_NAME="$HOSTNAME (CentOS 7)"
 VM_CPUS=1
 VM_MEMSIZE=512
 
-# find mirror at "http://mirror.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 ## TODO beta iso (EPEL repo is also beta)
-DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 
-PARALLELS_TOOLS_ISO="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
+# Download ISO...
+#DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
+# ...or use already downloaded ISO
+DISTRO_ISO_PATH=/tmp/CentOS-7.0-1406-x86_64-Minimal.iso"
+
+# Find mirror at "http://mirror.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 EOF
 }
 
@@ -162,7 +163,7 @@ function create_vm() {
 ##
 ##
 function vm_exists() {
-   prlctl list "$VM_TEMPLATE_NAME" > /dev/null 2>&1
+   prlctl list "$VM_NAME" > /dev/null 2>&1
 }
 
 ##
@@ -191,16 +192,22 @@ function create_vm_from_iso() {
    call_parallels_send_kickstart_boot_option
 
    kickstart_wait
-   umount_isos_message
+
+   stop_vm
+   umount_isos
+   clone_vm_to_template --force
+   start_vm
 }
 
 ##
 ##
 ##
 function create_vm_from_template() {
-   prlctl register "$VM_TEMPLATE_PATH" \
-      && prlctl create "$VM_NAME" --ostemplate "$VM_TEMPLATE_NAME" --dst "$VM_DIR"
-   prlctl unregister "$VM_TEMPLATE_NAME"
+   if prlctl register "$VM_TEMPLATE_PATH"
+   then
+      prlctl create "$VM_NAME" --ostemplate "$VM_TEMPLATE_NAME" --dst "$VM_DIR" || true
+      prlctl unregister "$VM_TEMPLATE_NAME"
+   fi
 }
 
 ##
@@ -211,8 +218,11 @@ function clone_vm_to_template() {
    then
       rm -rf "$VM_TEMPLATE_PATH"
    fi
-   prlctl clone "$VM_NAME" --name "$VM_TEMPLATE_NAME" --template --dst "$VM_TEMPLATE_DIR"
-   prlctl unregister "$VM_TEMPLATE_NAME"
+
+   if prlctl clone "$VM_NAME" --name "$VM_TEMPLATE_NAME" --template --dst "$VM_TEMPLATE_DIR"
+   then
+      prlctl unregister "$VM_TEMPLATE_NAME"
+   fi
 }
 
 ##
@@ -276,16 +286,6 @@ function umount_isos() {
 ##
 ##
 ##
-function umount_isos_message() {
-   printf "\n%s %s\n\n\t%s\n\n"\
-      "Optional:"\
-      "Disconnect ISOs and remove extra cdrom devices used by the installation by stopping the VM and running:"\
-      "$SCRIPT_NAME --umount"
-}
-
-##
-##
-##
 function init_env() {
    VM_DIR="$PWD/.vm"
 
@@ -297,8 +297,15 @@ function init_env() {
    KICKSTART_DIR="$TMP_DIR/kickstart"
 
    ISO_DIR="$PWD/.iso"
-   DISTRO_ISO="$ISO_DIR/${DISTRO_ISO_URL##*/}"
+   if [ -n "$DISTRO_ISO_PATH" ]
+   then
+      DISTRO_ISO="$ISO_DIR/${DISTRO_ISO_PATH##*/}"
+   else
+      DISTRO_ISO="$ISO_DIR/${DISTRO_ISO_URL##*/}"
+   fi
+
    KICKSTART_ISO="$ISO_DIR/kickstart.iso"
+   PARALLELS_TOOLS_ISO="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
 }
 
 ##
@@ -312,6 +319,11 @@ function create_workspace() {
 
    mkdir -p "$ISO_DIR"
    mkdir -p "$KICKSTART_DIR"
+
+   if [ -n "$DISTRO_ISO_PATH" -a ! -e "$DISTRO_ISO" ]
+   then
+      ln -s "$DISTRO_ISO_PATH" "$DISTRO_ISO"
+   fi
 }
 
 ##
@@ -505,7 +517,7 @@ repo --name=epel --baseurl=http://dl.fedoraproject.org/pub/epel/beta/7/x86_64/
 reboot
 
 %packages --nobase
-@core
+@core --nodefaults
 epel-release
 %end
 
