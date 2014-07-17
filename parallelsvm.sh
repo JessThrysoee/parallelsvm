@@ -33,7 +33,7 @@ function main() {
    trap delete_workspace EXIT
 
    # create VM
-   if [ "$1" = "create" ]
+   if [ "$1" = "up" ]
    then
       if vm_exists
       then
@@ -52,57 +52,65 @@ function main() {
    then
       clone_vm_to_template "$2"
 
-   # start VM
-   elif [ "$1" = "start" ]
+   # halt VM
+   elif [ "$1" = "halt" ]
    then
-      start_vm
+      halt_vm "$2"
 
-   # stop VM
-   elif [ "$1" = "stop" ]
+   # suspend VM
+   elif [ "$1" = "suspend" ]
    then
-      stop_vm
+      suspend_vm
 
-   # kill VM
-   elif [ "$1" = "kill" ]
+   # resume VM
+   elif [ "$1" = "resume" ]
    then
-      kill_vm
+      resume_vm
 
-   # delete VM
-   elif [ "$1" = "delete" ]
+   # destroy VM
+   elif [ "$1" = "destroy" ]
    then
       delete_vm
+
+   # VM info
+   elif [ "$1" = "info" ]
+   then
+      info_vm
+
+   # VM status
+   elif [ "$1" = "status" ]
+   then
+      status_vm
+
+   # global status
+   elif [ "$1" = "global-status" ]
+   then
+      global_status
+
 
    # bash shell in VM
    elif [ "$1" = "shell" ]
    then
       shell_vm
 
-   # umount ISO files from VM
-   elif [ "$1" = "umount" ]
-   then
-      umount_isos
-
-   # cleanup ISO files
-   elif [ "$1" = "cleanup" ]
-   then
-      delete_isos
-
    else
       echo "usage: $SCRIPT_NAME ACTION [OPTIONS]"
       echo ""
       echo "       ACTIONS:"
       echo "                init"
-      echo "                create"
+      echo "                up"
       echo "                template [--force]"
       echo ""
-      echo "                start"
-      echo "                stop"
-      echo "                kill"
-      echo "                delete"
-      echo "                shell"
+      echo "                halt [--force]"
+      echo "                suspend"
+      echo "                resume"
+      echo "                destroy"
       echo ""
-      echo "                umount"
-      echo "                cleanup"
+      echo "                info"
+      echo "                status"
+      echo "                global-status"
+      echo ""
+      echo "                shell"
    fi
 }
 
@@ -132,9 +140,9 @@ VM_MEMSIZE=512
 ## TODO beta iso (EPEL repo is also beta)
 
 # Download ISO...
-#DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
+DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 # ...or use already downloaded ISO
-DISTRO_ISO_PATH=/tmp/CentOS-7.0-1406-x86_64-Minimal.iso"
+#DISTRO_ISO_PATH=/tmp/CentOS-7.0-1406-x86_64-Minimal.iso"
 
 # Find mirror at "http://mirror.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 EOF
@@ -193,7 +201,7 @@ function create_vm_from_iso() {
 
    kickstart_wait
 
-   stop_vm
+   halt_vm
    umount_isos
    clone_vm_to_template --force
    start_vm
@@ -235,23 +243,62 @@ function start_vm() {
 ##
 ##
 ##
-function stop_vm() {
-   prlctl stop "$VM_NAME"
+function halt_vm() {
+   if [ "$1" = "--force" ]
+   then
+      prlctl stop "$VM_NAME" --kill
+   else
+      prlctl stop "$VM_NAME"
+   fi
 }
 
 ##
 ##
 ##
-function kill_vm() {
-   prlctl stop "$VM_NAME" --kill
+function suspend_vm() {
+   prlctl suspend "$VM_NAME"
+}
+
+##
+##
+##
+function resume_vm() {
+   prlctl resume "$VM_NAME"
 }
 
 ##
 ##
 ##
 function delete_vm() {
-   kill_vm
+   halt_vm --force
    prlctl delete "$VM_NAME"
+}
+
+##
+##
+##
+function info_vm() {
+   prlctl list --info --full "$VM_NAME"
+}
+
+##
+##
+##
+function status_vm() {
+   prlctl status "$VM_NAME"
+}
+
+##
+##
+##
+function global_status() {
+   echo "VMs:"
+   echo "----"
+   prlctl list --all
+   echo ""
+   echo "TEMPLATE:"
+   echo "---------"
+   prlctl list --all --template
 }
 
 ##
