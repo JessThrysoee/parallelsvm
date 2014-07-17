@@ -27,40 +27,29 @@ function main() {
       exit
    fi
    source_parallelsvm_rc
+
    init_env
+   create_workspace
+   trap delete_workspace EXIT
 
    # create VM
    if [ "$1" = "create" ]
    then
-      if vm_template_exists
+      if vm_exists
+      then
+         start_vm
+
+      elif vm_template_exists
       then
          create_vm_from_template
+
       else
-         is_parallels_sdk_installed
-         create_workspace
-         trap delete_workspace EXIT
-
-         fetch_distro_iso
-         ## TODO no checksums for beta iso
-         #checksum_distro_iso
-
-         make_kickstart_cfg
-         make_kickstart_iso
-
-         create_vm
-
-         make_parallels_send_kickstart_boot_option
-         call_parallels_send_kickstart_boot_option
-
-         kickstart_wait
-         umount_isos_message
+         create_vm_from_iso
       fi
 
    # create template of VM
    elif [ "$1" = "template" ]
    then
-      create_workspace
-      trap delete_workspace EXIT
       clone_vm_to_template "$2"
 
    # start VM
@@ -172,8 +161,37 @@ function create_vm() {
 ##
 ##
 ##
+function vm_exists() {
+   prlctl list "$VM_TEMPLATE_NAME" > /dev/null 2>&1
+}
+
+##
+##
+##
 function vm_template_exists() {
    test -e "$VM_TEMPLATE_PATH"
+}
+
+##
+##
+##
+function create_vm_from_iso() {
+   is_parallels_sdk_installed
+
+   fetch_distro_iso
+   ## TODO no checksums for beta iso
+   #checksum_distro_iso
+
+   make_kickstart_cfg
+   make_kickstart_iso
+
+   create_vm
+
+   make_parallels_send_kickstart_boot_option
+   call_parallels_send_kickstart_boot_option
+
+   kickstart_wait
+   umount_isos_message
 }
 
 ##
@@ -300,10 +318,7 @@ function create_workspace() {
 ##
 ##
 function delete_workspace() {
-   if [ -e "$TMP_DIR" ]
-   then
-      rm -rf "$TMP_DIR"
-   fi
+   rm -rf "$TMP_DIR"
 }
 
 ##
