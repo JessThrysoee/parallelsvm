@@ -47,6 +47,8 @@ function main() {
          create_vm_from_iso
       fi
 
+      wait_for_shell 1 "Booting"
+
    # create template of VM
    elif [ "$1" = "template" ]
    then
@@ -199,7 +201,7 @@ function create_vm_from_iso() {
    make_parallels_send_kickstart_boot_option
    call_parallels_send_kickstart_boot_option
 
-   kickstart_wait
+   wait_for_shell 10 "Kickstarting"
 
    halt_vm
    umount_isos
@@ -216,6 +218,7 @@ function create_vm_from_template() {
       prlctl create "$VM_NAME" --ostemplate "$VM_TEMPLATE_NAME" --dst "$VM_DIR" || true
       prlctl unregister "$VM_TEMPLATE_NAME"
    fi
+   start_vm
 }
 
 ##
@@ -304,12 +307,15 @@ function global_status() {
 ##
 ##
 ##
-function kickstart_wait() {
-   printf "\nKickstarting "
+function wait_for_shell() {
+   local timeout="$1"
+   local message="$2"
+
+   printf "\n%s " "$message"
    while ! prlctl exec "$VM_NAME" true 2> /dev/null
    do
       printf "."
-      sleep 10
+      sleep $timeout
    done
    printf "\n"
 }
