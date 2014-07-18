@@ -15,105 +15,143 @@
 ##
 ##
 function main() {
-   local SCRIPT_NAME=${0##*/}
-   local PARALLELSVM_RC=parallelsvm.rc
+   SCRIPT_NAME="${0##*/}"
+   PARALLELSVM_RC="parallelsvm.rc"
 
-   cd $PWD
+   create_tmp_dir
+   trap delete_tmp_dir EXIT
+
+   if [ -z "$1" ]
+   then
+      usage
+   fi
+
+   local action="$1"
+   shift 1
 
    # create rc file
-   if [ "$1" = "init" ]
+   if [ "$action" = "init" ]
    then
       create_parallelsvm_rc
       exit
    fi
    source_parallelsvm_rc
-
    init_env
-   create_workspace
-   trap delete_workspace EXIT
+
+   # Box
+   if [ "$action" = "box" ]
+   then
+      if [ "$1" = "add" ]
+      then
+         shift 1
+         box_add "$@"
+      fi
+      exit
+   fi
+
+   # VM
+   cd $PWD
+
+   if [[ -n $1 && $1 != --* ]]
+   then
+      VM_NAME="$1"
+      shift 1
+   fi
 
    # create VM
-   if [ "$1" = "up" ]
+   if [ "$action" = "up" ]
    then
       if vm_exists
       then
          start_vm
 
-      elif vm_template_exists
-      then
-         create_vm_from_template
-
       else
-         create_vm_from_iso
+         if box_exists
+         then
+            create_vm_from_box
+
+         else
+            echo "$SCRIPT_NAME: Unknown box name: $BOX_NAME"
+            exit
+         fi
       fi
 
       wait_for_shell 1 "Booting"
 
    # create template of VM
-   elif [ "$1" = "template" ]
+   elif [ "$action" = "template" ]
    then
-      clone_vm_to_template "$2"
+      clone_vm_to_template "$1"
 
    # halt VM
-   elif [ "$1" = "halt" ]
+   elif [ "$action" = "halt" ]
    then
-      halt_vm "$2"
+      halt_vm "$1"
 
    # suspend VM
-   elif [ "$1" = "suspend" ]
+   elif [ "$action" = "suspend" ]
    then
-      suspend_vm "$2"
+      suspend_vm
 
    # resume VM
-   elif [ "$1" = "resume" ]
+   elif [ "$action" = "resume" ]
    then
-      resume_vm "$2"
+      resume_vm
 
    # destroy VM
-   elif [ "$1" = "destroy" ]
+   elif [ "$action" = "destroy" ]
    then
-      delete_vm "$2"
+      delete_vm
 
    # VM info
-   elif [ "$1" = "info" ]
+   elif [ "$action" = "info" ]
    then
-      info_vm "$2"
+      info_vm
 
    # VM status
-   elif [ "$1" = "status" ]
+   elif [ "$action" = "status" ]
    then
-      status_vm "$2"
+      status_vm
 
    # global status
-   elif [ "$1" = "global-status" ]
+   elif [ "$action" = "global-status" ]
    then
       global_status
 
 
    # bash shell in VM
-   elif [ "$1" = "shell" ]
+   elif [ "$action" = "shell" ]
    then
       shell_vm
 
    else
-      echo "usage: $SCRIPT_NAME ACTION [OPTIONS]"
-      echo ""
-      echo "       ACTIONS:"
-      echo "                init"
-      echo "                up"
-      echo "                template [--force]"
-      echo ""
-      echo "                halt [--force]"
-      echo "                suspend"
-      echo "                resume"
-      echo "                destroy"
-      echo ""
-      echo "                info"
-      echo "                status"
-      echo "                global-status"
-      echo ""
-      echo "                shell"
+      usage
    fi
+}
+
+##
+##
+##
+function usage() {
+   echo "usage: $SCRIPT_NAME ACTION [OPTIONS]"
+   echo ""
+   echo "       ACTIONS:"
+   echo "                init"
+   echo "                up"
+   echo "                template [--force]"
+   echo ""
+   echo "                halt [--force]"
+   echo "                suspend"
+   echo "                resume"
+   echo "                destroy"
+   echo ""
+   echo "                info"
+   echo "                status"
+   echo "                global-status"
+   echo ""
+   echo "                shell"
+
+   exit
 }
 
 ##
@@ -138,15 +176,8 @@ HOSTNAME=centos
 VM_NAME="$HOSTNAME (CentOS 7)"
 VM_CPUS=1
 VM_MEMSIZE=512
-
-## TODO beta iso (EPEL repo is also beta)
-
-# Download ISO...
+BOX_NAME=centos
 DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
-# ...or use already downloaded ISO
-#DISTRO_ISO_PATH=/tmp/CentOS-7.0-1406-x86_64-Minimal.iso"
-
-# Find mirror at "http://mirror.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 EOF
 }
 
@@ -154,17 +185,17 @@ EOF
 ##
 ##
 function create_vm() {
-   prlctl create "$VM_NAME" --ostype linux --dst $VM_DIR
+   prlctl create "$VM_NAME" --ostype linux --dst "$VM_DIR"
    prlctl set    "$VM_NAME" --on-shutdown close
-   prlctl set    "$VM_NAME" --cpus $VM_CPUS
-   prlctl set    "$VM_NAME" --memsize $VM_MEMSIZE
+   prlctl set    "$VM_NAME" --cpus "$VM_CPUS"
+   prlctl set    "$VM_NAME" --memsize "$VM_MEMSIZE"
 
    prlctl set    "$VM_NAME" --device-del net0
    prlctl set    "$VM_NAME" --device-del cdrom0
 
-   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$DISTRO_ISO"
-   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$KICKSTART_ISO"
-   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$PARALLELS_TOOLS_ISO"
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$DISTRO_ISO_PATH"
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$KICKSTART_ISO_PATH"
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$PARALLELS_TOOLS_ISO_PATH"
    prlctl set    "$VM_NAME" --device-add net   --enable --type bridged
    prlctl start  "$VM_NAME"
 }
@@ -179,19 +210,83 @@ function vm_exists() {
 ##
 ##
 ##
-function vm_template_exists() {
-   test -e "$VM_TEMPLATE_PATH"
+function box_exists() {
+   test -e "$BOX_PATH"
 }
 
 ##
 ##
 ##
-function create_vm_from_iso() {
-   is_parallels_sdk_installed
+function init_env() {
+   #HOSTNAME
+
+   #VM_NAME
+   #VM_CPUS
+   #VM_MEMSIZE
+
+   #DISTRO_ISO_URL
+   DISTRO_ISO_NAME="${DISTRO_ISO_URL##*/}"
+   DISTRO_ISO_DIR="$HOME/.parallelsvm/iso"
+   DISTRO_ISO_PATH="$DISTRO_ISO_DIR/$DISTRO_ISO_NAME"
+
+   KICKSTART_ISO_DIR="$TMP_DIR/kickstart"
+   KICKSTART_ISO_PATH="$KICKSTART_ISO_DIR/kickstart.iso"
+
+   #BOX_NAME
+   BOX_TEMPLATE_NAME="${BOX_NAME}-template"
+   BOX_DIR="$HOME/.parallelsvm/box"
+   BOX_PATH="$BOX_DIR/${BOX_TEMPLATE_NAME}.pvm"
+
+   PARALLELS_TOOLS_ISO_PATH="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
+}
+
+##
+##
+##
+function make_dirs() {
+   local dir
+
+   for dir in "$@"
+   do
+      mkdir -p "$dir"
+   done
+}
+
+##
+##
+##
+function create_tmp_dir() {
+   TMP_DIR="$(mktemp -d "/tmp/${SCRIPT_NAME}.XXXXXX")"
+   mkdir -p "$TMP_DIR"
+}
+
+##
+##
+##
+function delete_tmp_dir() {
+   if [ -e "$TMP_DIR" ]
+   then
+      rm -rf "$TMP_DIR"
+   fi
+}
+
+##
+##
+##
+function random_string() {
+   local len="$1"
+   cat /dev/urandom | LC_CTYPE=C tr -dc "[:alpha:]" | head -c $len
+}
+
+##
+##
+##
+function box_add() {
+   VM_NAME="$(random_string 12)"
+   VM_DIR="$TMP_DIR"
+   make_dirs "$DISTRO_ISO_DIR" "$KICKSTART_ISO_DIR" "$BOX_DIR" "$VM_DIR"
 
    fetch_distro_iso
-   ## TODO no checksums for beta iso
-   #checksum_distro_iso
 
    make_kickstart_cfg
    make_kickstart_iso
@@ -205,19 +300,38 @@ function create_vm_from_iso() {
 
    halt_vm
    umount_isos
-   clone_vm_to_template --force
-   start_vm
+   clone_vm_to_template "$BOX_DIR" "$BOX_TEMPLATE_NAME" --force
+
+   delete_vm
 }
 
 ##
 ##
 ##
-function create_vm_from_template() {
-   if prlctl register "$VM_TEMPLATE_PATH"
+function box_remove() {
+   echo "TODO"
+}
+
+##
+##
+##
+function box_save() {
+   echo "TODO"
+}
+
+##
+##
+##
+function create_vm_from_box() {
+   if prlctl register "$BOX_PATH"
    then
-      prlctl create "$VM_NAME" --ostemplate "$VM_TEMPLATE_NAME" --dst "$VM_DIR" || true
-      prlctl unregister "$VM_TEMPLATE_NAME"
+      VM_DIR="$PWD/.vm"
+      make_dirs "$VM_DIR"
+
+      prlctl create "$VM_NAME" --ostemplate "$BOX_TEMPLATE_NAME" --dst "$VM_DIR" || true
+      prlctl unregister "$BOX_TEMPLATE_NAME"
    fi
+
    start_vm
 }
 
@@ -225,14 +339,18 @@ function create_vm_from_template() {
 ##
 ##
 function clone_vm_to_template() {
-   if [ "$1" = "--force" ]
+   local vm_template_dir="$1"
+   local vm_template_name="$2"
+   local force="$3"
+
+   if [ "$force" = "--force" ]
    then
-      rm -rf "$VM_TEMPLATE_PATH"
+      rm -rf "${vm_template_dir}/${vm_template_name}.pvm"
    fi
 
-   if prlctl clone "$VM_NAME" --name "$VM_TEMPLATE_NAME" --template --dst "$VM_TEMPLATE_DIR"
+   if prlctl clone "$VM_NAME" --name "$vm_template_name" --template --dst "$vm_template_dir"
    then
-      prlctl unregister "$VM_TEMPLATE_NAME"
+      prlctl unregister "$vm_template_name"
    fi
 }
 
@@ -249,9 +367,9 @@ function start_vm() {
 function halt_vm() {
    if [ "$1" = "--force" ]
    then
-      prlctl stop "${2:-$VM_NAME}" --kill || true
+      prlctl stop "$VM_NAME" --kill || true
    else
-      prlctl stop "${1:-$VM_NAME}" || true
+      prlctl stop "$VM_NAME" || true
    fi
 }
 
@@ -259,36 +377,36 @@ function halt_vm() {
 ##
 ##
 function suspend_vm() {
-   prlctl suspend "${1:-$VM_NAME}"
+   prlctl suspend "$VM_NAME"
 }
 
 ##
 ##
 ##
 function resume_vm() {
-   prlctl resume "${1:-$VM_NAME}"
+   prlctl resume "$VM_NAME"
 }
 
 ##
 ##
 ##
 function delete_vm() {
-   halt_vm --force "${1:-$VM_NAME}"
-   prlctl delete "${1:-$VM_NAME}" ||  prlctl unregister "${1:-$VM_NAME}"
+   halt_vm --force
+   prlctl delete "$VM_NAME" ||  prlctl unregister "$VM_NAME"
 }
 
 ##
 ##
 ##
 function info_vm() {
-   prlctl list --info --full "${1:-$VM_NAME}"
+   prlctl list --info --full "$VM_NAME"
 }
 
 ##
 ##
 ##
 function status_vm() {
-   prlctl status "${1:-$VM_NAME}"
+   prlctl status "$VM_NAME"
 }
 
 ##
@@ -302,22 +420,6 @@ function global_status() {
    echo "TEMPLATE:"
    echo "---------"
    prlctl list --all --template
-}
-
-##
-##
-##
-function wait_for_shell() {
-   local timeout="$1"
-   local message="$2"
-
-   printf "\n%s " "$message"
-   while ! prlctl exec "$VM_NAME" true 2> /dev/null
-   do
-      printf "."
-      sleep $timeout
-   done
-   printf "\n"
 }
 
 ##
@@ -339,68 +441,28 @@ function umount_isos() {
 ##
 ##
 ##
-function init_env() {
-   VM_DIR="$PWD/.vm"
+function wait_for_shell() {
+   local timeout="$1"
+   local message="$2"
 
-   VM_TEMPLATE_DIR="$PWD/.vm_template"
-   VM_TEMPLATE_NAME="${VM_NAME}_template"
-   VM_TEMPLATE_PATH="${VM_TEMPLATE_DIR}/${VM_TEMPLATE_NAME}.pvm"
-
-   TMP_DIR="$PWD/.tmp"
-   KICKSTART_DIR="$TMP_DIR/kickstart"
-
-   ISO_DIR="$PWD/.iso"
-   if [ -n "$DISTRO_ISO_PATH" ]
-   then
-      DISTRO_ISO="$ISO_DIR/${DISTRO_ISO_PATH##*/}"
-   else
-      DISTRO_ISO="$ISO_DIR/${DISTRO_ISO_URL##*/}"
-   fi
-
-   KICKSTART_ISO="$ISO_DIR/kickstart.iso"
-   PARALLELS_TOOLS_ISO="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
+   printf "\n%s " "$message"
+   while ! prlctl exec "$VM_NAME" true 2> /dev/null
+   do
+      printf "."
+      sleep $timeout
+   done
+   printf "\n"
 }
 
-##
-##
-##
-function create_workspace() {
-   mkdir -p "$VM_DIR"
-   mkdir -p "$VM_TEMPLATE_DIR"
 
-   mkdir -p "$TMP_DIR"
-
-   mkdir -p "$ISO_DIR"
-   mkdir -p "$KICKSTART_DIR"
-
-   if [ -n "$DISTRO_ISO_PATH" -a ! -e "$DISTRO_ISO" ]
-   then
-      ln -s "$DISTRO_ISO_PATH" "$DISTRO_ISO"
-   fi
-}
-
-##
-##
-##
-function delete_workspace() {
-   rm -rf "$TMP_DIR"
-}
-
-##
-##
-##
-function delete_isos() {
-   rm -f "$DISTRO_ISO"
-   rm -f "$KICKSTART_ISO"
-}
 
 ##
 ##
 ##
 function fetch_distro_iso() {
-   if [ ! -e "$DISTRO_ISO" ]
+   if [ ! -e "$DISTRO_ISO_PATH" ]
    then
-      curl -o "$DISTRO_ISO" "$DISTRO_ISO_URL"
+      curl -o "$DISTRO_ISO_PATH" "$DISTRO_ISO_URL"
    fi
 }
 
@@ -408,14 +470,13 @@ function fetch_distro_iso() {
 ##
 ##
 function checksum_distro_iso() {
-   local mirror_sum=$(curl -s ${DISTRO_ISO_URL%/*}/md5sum.txt |\
-      grep ${DISTRO_ISO_URL##*/} | awk '{print $1}')
+   local mirror_sum=$(curl -s ${DISTRO_ISO_URL%/*}/md5sum.txt | grep "$DISTRO_ISO_NAME" | awk '{print $1}')
 
-   local local_sum=$(md5 -q $DISTRO_ISO)
+   local local_sum=$(md5 -q $DISTRO_ISO_PATH)
 
    if [ "$mirror_sum" != "$local_sum" ]
    then
-      echo "checksum error -- try cleaning up with '$SCRIPT_NAME --cleanup'"
+      echo "checksum error -- try cleaning up with '$SCRIPT_NAME -cleanup'"
       exit
    fi
 }
@@ -435,7 +496,7 @@ function is_parallels_sdk_installed() {
 ##
 ##
 function call_parallels_send_kickstart_boot_option() {
-    python $TMP_DIR/parallels_send_kickstart_boot_option "$VM_NAME" "I"$'\t'" ks=cdrom:/dev/sr1:/ks.cfg"
+   python $TMP_DIR/parallels_send_kickstart_boot_option "$VM_NAME" "i"$'\t'" ks=cdrom:/dev/sr1:/ks.cfg"
 }
 
 ##
@@ -532,15 +593,14 @@ EOF
 ##
 ##
 function make_kickstart_iso() {
-   rm -f "$KICKSTART_ISO"
-   hdiutil makehybrid -quiet -iso -joliet -o "$KICKSTART_ISO" "$KICKSTART_DIR"
+   hdiutil makehybrid -quiet -iso -joliet -o "$KICKSTART_ISO_PATH" "$KICKSTART_ISO_DIR"
 }
 
 ##
 ##
 ##
 function make_kickstart_cfg() {
-   cat > "$KICKSTART_DIR/ks.cfg" <<EOF
+   cat > "$KICKSTART_ISO_DIR/ks.cfg" <<EOF
 cmdline
 skipx
 install
