@@ -62,27 +62,27 @@ function main() {
    # suspend VM
    elif [ "$1" = "suspend" ]
    then
-      suspend_vm
+      suspend_vm "$2"
 
    # resume VM
    elif [ "$1" = "resume" ]
    then
-      resume_vm
+      resume_vm "$2"
 
    # destroy VM
    elif [ "$1" = "destroy" ]
    then
-      delete_vm
+      delete_vm "$2"
 
    # VM info
    elif [ "$1" = "info" ]
    then
-      info_vm
+      info_vm "$2"
 
    # VM status
    elif [ "$1" = "status" ]
    then
-      status_vm
+      status_vm "$2"
 
    # global status
    elif [ "$1" = "global-status" ]
@@ -249,9 +249,9 @@ function start_vm() {
 function halt_vm() {
    if [ "$1" = "--force" ]
    then
-      prlctl stop "$VM_NAME" --kill
+      prlctl stop "${2:-$VM_NAME}" --kill || true
    else
-      prlctl stop "$VM_NAME"
+      prlctl stop "${1:-$VM_NAME}" || true
    fi
 }
 
@@ -259,36 +259,36 @@ function halt_vm() {
 ##
 ##
 function suspend_vm() {
-   prlctl suspend "$VM_NAME"
+   prlctl suspend "${1:-$VM_NAME}"
 }
 
 ##
 ##
 ##
 function resume_vm() {
-   prlctl resume "$VM_NAME"
+   prlctl resume "${1:-$VM_NAME}"
 }
 
 ##
 ##
 ##
 function delete_vm() {
-   halt_vm --force
-   prlctl delete "$VM_NAME"
+   halt_vm --force "${1:-$VM_NAME}"
+   prlctl delete "${1:-$VM_NAME}" ||  prlctl unregister "${1:-$VM_NAME}"
 }
 
 ##
 ##
 ##
 function info_vm() {
-   prlctl list --info --full "$VM_NAME"
+   prlctl list --info --full "${1:-$VM_NAME}"
 }
 
 ##
 ##
 ##
 function status_vm() {
-   prlctl status "$VM_NAME"
+   prlctl status "${1:-$VM_NAME}"
 }
 
 ##
