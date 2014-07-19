@@ -89,6 +89,7 @@ function main() {
          if box_exists
          then
             create_vm_from_box
+            change_hostname
 
          else
             echo "$SCRIPT_NAME: Box '$BOX_NAME' not found: Change BOX_NAME or run '$SCRIPT_NAME box add' to create a new box."
@@ -96,7 +97,6 @@ function main() {
          fi
       fi
 
-      wait_for_shell 1 "Booting"
 
    # halt VM
    elif [ "$action" = "halt" ]
@@ -398,6 +398,55 @@ function create_vm_from_box() {
 ##
 ##
 ##
+function make_change_hostname_script() {
+   cat > "$TMP_DIR/change_hostname" <<"EOF"
+#!/bin/bash -e
+
+HOSTNAME="$1"
+hostnamectl set-hostname "$HOSTNAME"
+
+ifcfg="/etc/sysconfig/network-scripts/ifcfg-eth0"
+if grep -q DHCP_HOSTNAME "$ifcfg" 2> /dev/null
+then
+   sed -i '1,$s/^DHCP_HOSTNAME=.*$/DHCP_HOSTNAME='$HOSTNAME'/' "$ifcfg"
+else
+   echo "DHCP_HOSTNAME=$HOSTNAME" >> "$ifcfg"
+fi
+
+conn_uuid=$(nmcli -t -f device,uuid  conn | grep eth0: | cut -d: -f2)
+nmcli dev disconnect eth0
+nmcli con up uuid "$conn_uuid"
+systemctl restart avahi-daemon.service
+EOF
+
+   chmod +x "$TMP_DIR/change_hostname"
+}
+
+##
+##
+##
+function change_hostname() {
+   if [ "$(prlctl exec "$VM_NAME" hostname)" = "$HOSTNAME" ]
+   then
+      return
+   fi
+
+   local shf="parallelsvm_shared_host_folder"
+   make_change_hostname_script
+
+   if prlctl set  "$VM_NAME" --shf-host-add "$shf" --path "$TMP_DIR"
+   then
+      ## ls blocks until $shf is mounted
+      prlctl exec "$VM_NAME" ls -l /media/psf/ > /dev/null
+
+      prlctl exec "$VM_NAME" /media/psf/$shf/change_hostname $HOSTNAME || true
+      prlctl set  "$VM_NAME" --shf-host-del "$shf"
+   fi
+}
+
+##
+##
+##
 function clone_vm_to_template() {
    local vm_template_name="$1"
    local force="$2"
@@ -418,6 +467,7 @@ function clone_vm_to_template() {
 ##
 function start_vm() {
    prlctl start "$VM_NAME"
+   wait_for_shell 1 "Booting"
 }
 
 ##
@@ -560,7 +610,7 @@ function call_parallels_send_kickstart_boot_option() {
 ##
 ##
 function make_parallels_send_kickstart_boot_option() {
-   cat > "$TMP_DIR/parallels_send_kickstart_boot_option" <<EOF
+   cat > "$TMP_DIR/parallels_send_kickstart_boot_option" <<"EOF"
 #!/usr/bin/env python
 
 import sys
@@ -657,7 +707,7 @@ function make_kickstart_iso() {
 ##
 ##
 function make_kickstart_cfg() {
-   cat > "$KICKSTART_ISO_DIR/ks.cfg" <<EOF
+   cat > "$KICKSTART_ISO_DIR/ks.cfg" <<"EOF"
 cmdline
 skipx
 install
@@ -667,7 +717,7 @@ lang en_US.UTF-8
 keyboard us
 timezone --utc Etc/UTC
 
-network --activate --onboot yes --device eth0 --bootproto dhcp --noipv6 --hostname $HOSTNAME
+network --activate --onboot yes --device eth0 --bootproto dhcp --noipv6
 
 rootpw  --plaintext newroot
 authconfig --enableshadow --passalgo=sha512
