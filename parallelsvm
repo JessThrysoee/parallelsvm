@@ -15,8 +15,7 @@
 ##
 ##
 function main() {
-   SCRIPT_NAME="${0##*/}"
-   PARALLELSVM_RC="parallelsvm.rc"
+   init_static_env
 
    create_tmp_dir
    trap delete_tmp_dir EXIT
@@ -26,17 +25,21 @@ function main() {
       usage
    fi
 
-   cd $PWD
-
    local action="$1"
    shift 1
 
-   # create rc file
+   # init - create rc file
    if [ "$action" = "init" ]
    then
       create_parallelsvm_rc
       exit
+   # global status
+   elif [ "$action" = "global-status" ]
+   then
+      global_status
+      exit
    fi
+
    source_parallelsvm_rc
    init_env
 
@@ -46,6 +49,7 @@ function main() {
       if [ "$1" = "add" ]
       then
          shift 1
+         assert_parallelsvm_rc
          box_add "$@"
 
       elif [ "$1" = "list" ]
@@ -78,6 +82,8 @@ function main() {
       shift 1
    fi
 
+   assert_vm_name
+
    # create VM
    if [ "$action" = "up" ]
    then
@@ -86,6 +92,7 @@ function main() {
          start_vm
 
       else
+         assert_parallelsvm_rc
          if box_exists
          then
             create_vm_from_box
@@ -127,11 +134,6 @@ function main() {
    then
       status_vm
 
-   # global status
-   elif [ "$action" = "global-status" ]
-   then
-      global_status
-
    # bash shell in VM
    elif [ "$action" = "shell" ]
    then
@@ -148,25 +150,27 @@ function main() {
 function usage() {
    echo "usage: $SCRIPT_NAME ACTION [OPTIONS]"
    echo ""
-   echo "       ACTIONS:"
-   echo "                init"
-   echo "                up"
+   echo "   ACTIONS:"
    echo ""
-   echo "                halt [--force]"
-   echo "                suspend"
-   echo "                resume"
-   echo "                destroy"
+   echo "      init"
+   echo "      up [vm_name]"
    echo ""
-   echo "                info"
-   echo "                status"
-   echo "                global-status"
-   echo "                status"
-   echo "                shell"
+   echo "      halt [vm_name] [--force]"
+   echo "      suspend [vm_name]"
+   echo "      resume [vm_name]"
+   echo "      destroy [vm_name]"
    echo ""
-   echo "                box add"
-   echo "                box list"
-   echo "                box saveas <new_box_name> [--force]"
-   echo "                box remove <box_name>"
+   echo "      info [vm_name]"
+   echo "      status [vm_name]"
+   echo "      global-status"
+   echo ""
+   echo "      shell [vm_name]"
+   echo ""
+   echo "      box add"
+   echo "      box list"
+   echo "      box saveas <new_box_name> [--force]"
+   echo "      box remove <box_name>"
+   echo "      box rename <box_name> <new_box_name>"
    echo ""
 
    exit
@@ -176,13 +180,32 @@ function usage() {
 ##
 ##
 function source_parallelsvm_rc() {
+   if [ -e "$PARALLELSVM_RC" ]
+   then
+      . "$PARALLELSVM_RC"
+   fi
+}
+
+##
+##
+##
+function assert_parallelsvm_rc() {
    if [ ! -e "$PARALLELSVM_RC" ]
    then
-      echo "$SCRIPT_NAME: $PARALLELSVM_RC not found: call '$SCRIPT_NAME init' or change to dir containing $PARALLELSVM_RC"
+      echo "$SCRIPT_NAME: $PARALLELSVM_RC not found: call '$SCRIPT_NAME init' or change to dir containing a $PARALLELSVM_RC"
       exit
    fi
+}
 
-   . "$PARALLELSVM_RC"
+##
+##
+##
+function assert_vm_name() {
+   if [ -z "$VM_NAME" ]
+   then
+      echo "$SCRIPT_NAME: VM name not found. Specify a [vm_name] or change to dir containing a $PARALLELSVM_RC"
+      usage
+   fi
 }
 
 ##
@@ -224,6 +247,22 @@ function box_template_name() {
 ##
 ##
 ##
+function init_static_env() {
+   SCRIPT_NAME="${0##*/}"
+
+   PARALLELSVM_RC="parallelsvm.rc"
+
+   CONF_DIR="$HOME/.parallelsvm"
+
+   BOX_DIR="$CONF_DIR/box"
+   DISTRO_ISO_DIR="$CONF_DIR/iso"
+
+   PARALLELS_TOOLS_ISO_PATH="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
+}
+
+##
+##
+##
 function init_env() {
    #HOSTNAME
 
@@ -233,7 +272,6 @@ function init_env() {
 
    #DISTRO_ISO_URL
    DISTRO_ISO_NAME="${DISTRO_ISO_URL##*/}"
-   DISTRO_ISO_DIR="$HOME/.parallelsvm/iso"
    DISTRO_ISO_PATH="$DISTRO_ISO_DIR/$DISTRO_ISO_NAME"
 
    KICKSTART_ISO_DIR="$TMP_DIR/kickstart"
@@ -241,10 +279,7 @@ function init_env() {
 
    #BOX_NAME
    BOX_TEMPLATE_NAME="$(box_template_name "${BOX_NAME}")"
-   BOX_DIR="$HOME/.parallelsvm/box"
    BOX_PATH="$BOX_DIR/${BOX_TEMPLATE_NAME}.pvm"
-
-   PARALLELS_TOOLS_ISO_PATH="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin.iso"
 }
 
 ##
