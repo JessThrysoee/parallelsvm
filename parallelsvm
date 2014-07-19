@@ -62,6 +62,11 @@ function main() {
          shift 1
          box_remove "$@"
 
+      elif [ "$1" = "rename" ]
+      then
+         shift 1
+         box_rename "$@"
+
       fi
       exit
    fi
@@ -323,7 +328,7 @@ function box_add() {
 
    halt_vm
    umount_isos
-   clone_vm_to_template "$BOX_DIR" "$BOX_TEMPLATE_NAME" --force
+   clone_vm_to_template "$BOX_TEMPLATE_NAME" --force
 
    delete_vm
 }
@@ -340,7 +345,7 @@ function box_saveas() {
       echo "$SCRIPT_NAME: box saveas failed: specify a new box name"
    fi
 
-   clone_vm_to_template "$BOX_DIR" "$(box_template_name "$new_box_name")" $force
+   clone_vm_to_template "$(box_template_name "$new_box_name")" $force
 }
 
 ##
@@ -357,6 +362,21 @@ function box_remove() {
 ##
 function box_list() {
    ls -1 "$BOX_DIR" | sed 's/-template.pvm//'
+}
+
+##
+##
+##
+function box_rename() {
+   local box_name="$1"
+   local new_box_name="$2"
+
+   local box_template_name="$(box_template_name "$box_name")"
+   local new_box_template_name="$(box_template_name "$new_box_name")"
+
+   prlctl register "$BOX_DIR/$box_template_name.pvm"
+   prlctl set "$box_template_name" --name "$new_box_template_name"
+   prlctl unregister "$new_box_template_name"
 }
 
 ##
@@ -379,16 +399,15 @@ function create_vm_from_box() {
 ##
 ##
 function clone_vm_to_template() {
-   local vm_template_dir="$1"
-   local vm_template_name="$2"
-   local force="$3"
+   local vm_template_name="$1"
+   local force="$2"
 
    if [ "$force" = "--force" ]
    then
-      rm -rf "${vm_template_dir}/${vm_template_name}.pvm"
+      rm -rf "$BOX_DIR/${vm_template_name}.pvm"
    fi
 
-   if prlctl clone "$VM_NAME" --name "$vm_template_name" --template --dst "$vm_template_dir"
+   if prlctl clone "$VM_NAME" --name "$vm_template_name" --template --dst "$BOX_DIR"
    then
       prlctl unregister "$vm_template_name"
    fi
