@@ -48,6 +48,10 @@ function main() {
          shift 1
          box_add "$@"
 
+      elif [ "$1" = "list" ]
+      then
+         box_list
+
       elif [ "$1" = "saveas" ]
       then
          shift 1
@@ -157,6 +161,7 @@ function usage() {
    echo "                shell"
    echo ""
    echo "                box add"
+   echo "                box list"
    echo "                box saveas <new_box_name> [--force]"
    echo "                box remove <box_name>"
    echo ""
@@ -345,6 +350,13 @@ function box_remove() {
    local box_name="$1"
 
    rm -r "$BOX_DIR/$(box_template_name "$box_name").pvm"
+}
+
+##
+##
+##
+function box_list() {
+   ls -1 "$BOX_DIR" | sed 's/-template.pvm//'
 }
 
 ##
