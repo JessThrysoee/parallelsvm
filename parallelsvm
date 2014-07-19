@@ -191,9 +191,9 @@ function source_parallelsvm_rc() {
 ##
 ##
 function create_parallelsvm_rc() {
-   cat > "$PARALLELSVM_RC" <<"EOF"
-HOSTNAME=centos
-VM_NAME="$HOSTNAME (CentOS 7)"
+   cat > "$PARALLELSVM_RC" <<EOF
+HOSTNAME="${PWD##*/}"
+VM_NAME="\$HOSTNAME"
 VM_CPUS=1
 VM_MEMSIZE=512
 BOX_NAME=base
