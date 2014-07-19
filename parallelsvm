@@ -389,6 +389,8 @@ function create_vm_from_box() {
       make_dirs "$VM_DIR"
 
       prlctl create "$VM_NAME" --ostemplate "$BOX_TEMPLATE_NAME" --dst "$VM_DIR" || true
+      prlctl set    "$VM_NAME" --cpus "$VM_CPUS"
+      prlctl set    "$VM_NAME" --memsize "$VM_MEMSIZE"
       prlctl unregister "$BOX_TEMPLATE_NAME"
    fi
 
