@@ -26,6 +26,8 @@ function main() {
       usage
    fi
 
+   cd $PWD
+
    local action="$1"
    shift 1
 
@@ -45,13 +47,22 @@ function main() {
       then
          shift 1
          box_add "$@"
+
+      elif [ "$1" = "saveas" ]
+      then
+         shift 1
+         box_saveas "$@"
+
+      elif [ "$1" = "remove" ]
+      then
+         shift 1
+         box_remove "$@"
+
       fi
       exit
    fi
 
    # VM
-   cd $PWD
-
    if [[ -n $1 && $1 != --* ]]
    then
       VM_NAME="$1"
@@ -71,17 +82,12 @@ function main() {
             create_vm_from_box
 
          else
-            echo "$SCRIPT_NAME: Unknown box name: $BOX_NAME"
+            echo "$SCRIPT_NAME: Box '$BOX_NAME' not found: Change BOX_NAME or run '$SCRIPT_NAME box add' to create a new box."
             exit
          fi
       fi
 
       wait_for_shell 1 "Booting"
-
-   # create template of VM
-   elif [ "$action" = "template" ]
-   then
-      clone_vm_to_template "$1"
 
    # halt VM
    elif [ "$action" = "halt" ]
@@ -138,7 +144,6 @@ function usage() {
    echo "       ACTIONS:"
    echo "                init"
    echo "                up"
-   echo "                template [--force]"
    echo ""
    echo "                halt [--force]"
    echo "                suspend"
@@ -148,8 +153,13 @@ function usage() {
    echo "                info"
    echo "                status"
    echo "                global-status"
-   echo ""
+   echo "                status"
    echo "                shell"
+   echo ""
+   echo "                box add"
+   echo "                box saveas <new_box_name> [--force]"
+   echo "                box remove <box_name>"
+   echo ""
 
    exit
 }
@@ -160,7 +170,7 @@ function usage() {
 function source_parallelsvm_rc() {
    if [ ! -e "$PARALLELSVM_RC" ]
    then
-      echo "$PARALLELSVM_RC not found: call '$SCRIPT_NAME init' or change to dir containing $PARALLELSVM_RC"
+      echo "$SCRIPT_NAME: $PARALLELSVM_RC not found: call '$SCRIPT_NAME init' or change to dir containing $PARALLELSVM_RC"
       exit
    fi
 
@@ -176,7 +186,7 @@ HOSTNAME=centos
 VM_NAME="$HOSTNAME (CentOS 7)"
 VM_CPUS=1
 VM_MEMSIZE=512
-BOX_NAME=centos
+BOX_NAME=base
 DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 EOF
 }
@@ -217,6 +227,14 @@ function box_exists() {
 ##
 ##
 ##
+function box_template_name() {
+   local box_name="$1"
+   echo ${box_name}-template
+}
+
+##
+##
+##
 function init_env() {
    #HOSTNAME
 
@@ -233,7 +251,7 @@ function init_env() {
    KICKSTART_ISO_PATH="$KICKSTART_ISO_DIR/kickstart.iso"
 
    #BOX_NAME
-   BOX_TEMPLATE_NAME="${BOX_NAME}-template"
+   BOX_TEMPLATE_NAME="$(box_template_name "${BOX_NAME}")"
    BOX_DIR="$HOME/.parallelsvm/box"
    BOX_PATH="$BOX_DIR/${BOX_TEMPLATE_NAME}.pvm"
 
@@ -308,15 +326,25 @@ function box_add() {
 ##
 ##
 ##
-function box_remove() {
-   echo "TODO"
+function box_saveas() {
+   local new_box_name="$1"
+   local force="$2"
+
+   if [ -z "$new_box_name" ] then
+   then
+      echo "$SCRIPT_NAME: box saveas failed: specify a new box name"
+   fi
+
+   clone_vm_to_template "$BOX_DIR" "$(box_template_name "$new_box_name")" $force
 }
 
 ##
 ##
 ##
-function box_save() {
-   echo "TODO"
+function box_remove() {
+   local box_name="$1"
+
+   rm -r "$BOX_DIR/$(box_template_name "$box_name").pvm"
 }
 
 ##
@@ -454,8 +482,6 @@ function wait_for_shell() {
    printf "\n"
 }
 
-
-
 ##
 ##
 ##
@@ -476,7 +502,7 @@ function checksum_distro_iso() {
 
    if [ "$mirror_sum" != "$local_sum" ]
    then
-      echo "checksum error -- try cleaning up with '$SCRIPT_NAME -cleanup'"
+      echo "$SCRIPT_NAME: checksum error -- try cleaning up with '$SCRIPT_NAME -cleanup'"
       exit
    fi
 }
@@ -487,7 +513,7 @@ function checksum_distro_iso() {
 function is_parallels_sdk_installed() {
    if ! python -c 'import prlsdkapi' 2> /dev/null
    then
-      echo "'Parallels Virtualization SDK' is not installed. Get it from http://www.parallels.com/downloads/desktop/"
+      echo "$SCRIPT_NAME: 'Parallels Virtualization SDK' is not installed. Get it from http://www.parallels.com/downloads/desktop/"
       exit
    fi
 }
