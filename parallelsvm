@@ -97,7 +97,6 @@ function main() {
          fi
       fi
 
-
    # halt VM
    elif [ "$action" = "halt" ]
    then
@@ -132,7 +131,6 @@ function main() {
    elif [ "$action" = "global-status" ]
    then
       global_status
-
 
    # bash shell in VM
    elif [ "$action" = "shell" ]
@@ -199,25 +197,6 @@ VM_MEMSIZE=512
 BOX_NAME=base
 DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 EOF
-}
-
-##
-##
-##
-function create_vm() {
-   prlctl create "$VM_NAME" --ostype linux --dst "$VM_DIR"
-   prlctl set    "$VM_NAME" --on-shutdown close
-   prlctl set    "$VM_NAME" --cpus "$VM_CPUS"
-   prlctl set    "$VM_NAME" --memsize "$VM_MEMSIZE"
-
-   prlctl set    "$VM_NAME" --device-del net0
-   prlctl set    "$VM_NAME" --device-del cdrom0
-
-   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$DISTRO_ISO_PATH"
-   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$KICKSTART_ISO_PATH"
-   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$PARALLELS_TOOLS_ISO_PATH"
-   prlctl set    "$VM_NAME" --device-add net   --enable --type bridged
-   prlctl start  "$VM_NAME"
 }
 
 ##
@@ -336,6 +315,61 @@ function box_add() {
 ##
 ##
 ##
+function create_vm() {
+   prlctl create "$VM_NAME" --ostype linux --dst "$VM_DIR"
+   prlctl set    "$VM_NAME" --on-shutdown close
+   prlctl set    "$VM_NAME" --cpus "$VM_CPUS"
+   prlctl set    "$VM_NAME" --memsize "$VM_MEMSIZE"
+
+   prlctl set    "$VM_NAME" --device-del net0
+   prlctl set    "$VM_NAME" --device-del cdrom0
+
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$DISTRO_ISO_PATH"
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$KICKSTART_ISO_PATH"
+   prlctl set    "$VM_NAME" --device-add cdrom --enable --image "$PARALLELS_TOOLS_ISO_PATH"
+   prlctl set    "$VM_NAME" --device-add net   --enable --type bridged
+   prlctl start  "$VM_NAME"
+}
+
+##
+##
+##
+function clone_vm_to_template() {
+   local vm_template_name="$1"
+   local force="$2"
+
+   if [ "$force" = "--force" ]
+   then
+      rm -rf "$BOX_DIR/${vm_template_name}.pvm"
+   fi
+
+   if prlctl clone "$VM_NAME" --name "$vm_template_name" --template --dst "$BOX_DIR"
+   then
+      prlctl unregister "$vm_template_name"
+   fi
+}
+
+##
+##
+##
+function create_vm_from_box() {
+   if prlctl register "$BOX_PATH"
+   then
+      VM_DIR="$PWD/.vm"
+      make_dirs "$VM_DIR"
+
+      prlctl create "$VM_NAME" --ostemplate "$BOX_TEMPLATE_NAME" --dst "$VM_DIR" || true
+      prlctl set    "$VM_NAME" --cpus "$VM_CPUS"
+      prlctl set    "$VM_NAME" --memsize "$VM_MEMSIZE"
+      prlctl unregister "$BOX_TEMPLATE_NAME"
+   fi
+
+   start_vm
+}
+
+##
+##
+##
 function box_saveas() {
    local new_box_name="$1"
    local force="$2"
@@ -377,24 +411,6 @@ function box_rename() {
    prlctl register "$BOX_DIR/$box_template_name.pvm"
    prlctl set "$box_template_name" --name "$new_box_template_name"
    prlctl unregister "$new_box_template_name"
-}
-
-##
-##
-##
-function create_vm_from_box() {
-   if prlctl register "$BOX_PATH"
-   then
-      VM_DIR="$PWD/.vm"
-      make_dirs "$VM_DIR"
-
-      prlctl create "$VM_NAME" --ostemplate "$BOX_TEMPLATE_NAME" --dst "$VM_DIR" || true
-      prlctl set    "$VM_NAME" --cpus "$VM_CPUS"
-      prlctl set    "$VM_NAME" --memsize "$VM_MEMSIZE"
-      prlctl unregister "$BOX_TEMPLATE_NAME"
-   fi
-
-   start_vm
 }
 
 ##
@@ -443,24 +459,6 @@ function change_hostname() {
 
       prlctl exec "$VM_NAME" /media/psf/$shf/change_hostname $HOSTNAME || true
       prlctl set  "$VM_NAME" --shf-host-del "$shf"
-   fi
-}
-
-##
-##
-##
-function clone_vm_to_template() {
-   local vm_template_name="$1"
-   local force="$2"
-
-   if [ "$force" = "--force" ]
-   then
-      rm -rf "$BOX_DIR/${vm_template_name}.pvm"
-   fi
-
-   if prlctl clone "$VM_NAME" --name "$vm_template_name" --template --dst "$BOX_DIR"
-   then
-      prlctl unregister "$vm_template_name"
    fi
 }
 
