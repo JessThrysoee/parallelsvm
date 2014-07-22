@@ -1,14 +1,8 @@
 #!/bin/bash -e
 #
-# Unattended Kickstart install of minimal CentOS server in Parallels VM.
+# A Vagrant like shell script for managing CentOS VMs in Parallels.
 #
-# Parallels Tools is installed.
-#
-# Zeroconf (a.k.a. rendezvous, a.k.a. bonjour) is enabled for easy ssh access on the
-# .local domain, e.g. with HOSTNAME=centos it is immediately possible to login
-# from OS X with 'ssh centos.local -l root'.
-#
-
+# http://thrysoee.dk/parallelsvm/
 #-----------------------------------------------------------------------------------------------
 
 ##
@@ -218,7 +212,7 @@ VM_NAME="\$HOSTNAME"
 VM_CPUS=1
 VM_MEMSIZE=512
 BOX_NAME=base
-DISTRO_ISO_URL="http://buildlogs.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
+DISTRO_ISO_URL="http://isoredirect.centos.org/centos/7/isos/x86_64/CentOS-7.0-1406-x86_64-Minimal.iso"
 EOF
 }
 
@@ -328,7 +322,9 @@ function box_add() {
    VM_DIR="$TMP_DIR"
    make_dirs "$DISTRO_ISO_DIR" "$KICKSTART_ISO_DIR" "$BOX_DIR" "$VM_DIR"
 
+   pick_isodirect_mirror
    fetch_distro_iso
+   checksum_distro_iso
 
    make_kickstart_cfg
    make_kickstart_iso
@@ -535,7 +531,7 @@ function resume_vm() {
 ##
 ##
 function delete_vm() {
-   halt_vm --force
+   halt_vm --force 2> /dev/null
    prlctl delete "$VM_NAME" ||  prlctl unregister "$VM_NAME"
 }
 
@@ -601,6 +597,18 @@ function wait_for_shell() {
 ##
 ##
 ##
+function pick_isodirect_mirror() {
+   if [[ $DISTRO_ISO_URL == */isoredirect.centos.org/* ]]
+   then
+      DISTRO_ISO_URL=$(curl -sSL "$DISTRO_ISO_URL" |\
+         xmllint --html --xmlout --encode utf-8 --dropdtd --nowarning - 2>/dev/null |\
+         xpath "string(//a/@href[contains(., '/isos/x86_64/')])" 2> /dev/null)
+   fi
+}
+
+##
+##
+##
 function fetch_distro_iso() {
    if [ ! -e "$DISTRO_ISO_PATH" ]
    then
@@ -618,7 +626,7 @@ function checksum_distro_iso() {
 
    if [ "$mirror_sum" != "$local_sum" ]
    then
-      echo "$SCRIPT_NAME: checksum error -- try cleaning up with '$SCRIPT_NAME -cleanup'"
+      echo "$SCRIPT_NAME: checksum error -- try again after removing the old IOS: 'rm $DISTRO_ISO_PATH'"
       exit
    fi
 }

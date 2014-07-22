@@ -48,7 +48,7 @@ _parallelsvm()
             case "$prev" in
                remove|rename)
                   local IFS=$'\n'
-                  COMPREPLY=( $(compgen -W "$(prlctl list -a -o name | tail -n+2)" -- "$cur" | sed 's/ /\\ /g') )
+                  COMPREPLY=( $(compgen -W "$(parallelsvm box list)" -- "$cur" | sed 's/ /\\ /g') )
                   unset IFS
                   ;;
                *)
