@@ -800,15 +800,19 @@ umount /mnt
 echo "Note: Parallels Tools can be updated by running 'ptiagent-cmd --info'"
 
 yum install -y\
+   util-linux\
    net-tools\
-   bash-completion\
-   git\
-   vim\
-   man\
+   bridge-utils\
+   bind-utils\
+   tcpdump\
    avahi\
    avahi-tools\
    nss-mdns\
    avahi-compat-libdns_sd\
+   bash-completion\
+   git\
+   vim\
+   man\
    docker-io
 
 systemctl enable docker || true
