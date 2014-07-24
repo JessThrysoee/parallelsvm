@@ -815,7 +815,7 @@ yum install -y\
    man\
    docker-io
 
-systemctl enable docker || true
+systemctl enable docker.service || true
 
 yum upgrade -y
 
