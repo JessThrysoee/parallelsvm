@@ -21,9 +21,24 @@ _parallelsvm()
    elif (( $COMP_CWORD == 2 ))
    then
       case "$prev" in
-         up|halt|suspend|resume|destroy|info|status|shell)
+         halt|suspend|shell)
             local IFS=$'\n'
-            COMPREPLY=( $(compgen -W "$(prlctl list -a -o name | tail -n+2)" -- "$cur" | sed 's/ /\\ /g') )
+            # complete running VMs
+            COMPREPLY=( $(compgen -W "$(prlctl list -o name | tail -n+2)" -- "$cur" | sed 's/ /\\ /g') )
+            unset IFS
+            ;;
+
+         up|resume)
+            local IFS=$'\n'
+            # complete not running VMs
+            COMPREPLY=( $(compgen -W "$(comm -23 <(prlctl list -a -o name| tail -n+2| sort) <(prlctl list -o name | tail -n+2| sort))" -- "$cur" | sed 's/ /\\ /g') )
+            unset IFS
+            ;;
+
+         destroy|info|status)
+            local IFS=$'\n'
+            # complete all VMs
+            COMPREPLY=( $(compgen -W "$(prlctl list -a -o name| tail -n+2)" -- "$cur" | sed 's/ /\\ /g') )
             unset IFS
             ;;
 
