@@ -497,6 +497,8 @@ function change_hostname() {
 ##
 ##
 function start_vm() {
+   prlctl set   "$VM_NAME" --cpus "$VM_CPUS"
+   prlctl set   "$VM_NAME" --memsize "$VM_MEMSIZE"
    prlctl start "$VM_NAME"
    wait_for_shell 1 "Booting"
 }
