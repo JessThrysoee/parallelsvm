@@ -474,6 +474,56 @@ EOF
 ##
 ##
 ##
+function make_bashrc_additions() {
+   cat > "$TMP_DIR/nsenter" <<"EOF"
+
+function _nsenter()
+{
+   local cur
+   _get_comp_words_by_ref -n : cur
+   __docker_containers_running
+}
+
+function nsenter
+{
+   local container pid opts
+
+   container="$1"
+   if [ -z "$container" ]
+   then
+      exit 1
+   fi
+   shift 1
+
+   pid=$(docker inspect -f "{{ .State.Pid }}" "$container")
+   if [ -z "$pid" ]
+   then
+      exit 1
+   fi
+
+   opts="--target $pid --mount --uts --ipc --net --pid --"
+
+   if [ -z "$1" ]
+   then
+      # No command given.
+      # Use su to clear all host environment variables except for TERM,
+      # initialize the environment variables HOME, SHELL, USER, LOGNAME, PATH,
+      # and start a login shell.
+      sudo /usr/bin/nsenter $opts su - root
+   else
+      # Use env to clear all host environment variables.
+      sudo /usr/bin/nsenter $opts env --ignore-environment -- "$@"
+   fi
+}
+
+complete -F _nsenter nsenter
+
+EOF
+}
+
+##
+##
+##
 function change_hostname() {
    if [ "$(prlctl exec "$VM_NAME" hostname)" = "$HOSTNAME" ]
    then
